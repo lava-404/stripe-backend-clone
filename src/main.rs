@@ -12,7 +12,7 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, query};
@@ -120,7 +120,6 @@ struct JwtService {
 impl JwtService {
     fn create_token(&self, user_id: String, token_type: TokenType, expires_in: usize) -> String {
         let now = Utc::now().timestamp() as usize;
-
         let claims = Claims {
             sub: user_id,
             token_type,
@@ -262,6 +261,7 @@ async fn signup(
     jar: CookieJar,
     Json(payload): Json<SignInPayload>,
 ) -> Result<impl IntoResponse, AppError> {
+    println!("Reached signup");
     // Check whether the user already exists.
     let user_exists = query("SELECT * FROM users WHERE email = $1")
         .bind(&payload.email)
@@ -271,7 +271,7 @@ async fn signup(
             println!("Database error: {e}");
             AppError::DatabaseError
         })?;
-
+    println!("Checked if user exists");
     if let Some(_user) = user_exists {
         return Err(AppError::EmailAlreadyExists);
     }
@@ -279,10 +279,11 @@ async fn signup(
     // Hash the password.
     let password_hash =
         hash_password(payload.password.as_str()).map_err(|_| AppError::InvalidCredentials)?;
+    println!("Password hashed");
 
     // Insert the new user.
     let id = Uuid::new_v4();
-    let now = Utc::now().timestamp();
+    let now = Utc::now();
 
     query(
         r#"
@@ -299,9 +300,10 @@ async fn signup(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        println!("Insert error: {e}");
+        eprintln!("Insert error: {:#?}", e);
         AppError::DatabaseError
     })?;
+    println!("Inserted user");
 
     // Issue tokens.
     let access_token = state.jwt.create_access_token(id);
