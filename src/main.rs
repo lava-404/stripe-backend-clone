@@ -8,13 +8,13 @@ use sqlx::{PgPool};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
-
-use crate::{auth::{jwt::{JwtService}, signin::signup}, config::config::{ApiKeyService, Config, IdempotencyStore, Metrics}};
+use crate::{auth::{jwt::JwtService, signin::signup}, config::config::{ApiKeyService, Config, IdempotencyStore, Metrics}, products::products::{create_products, get_products}, subscriptions::subscriptions::subscription_worker};
 mod auth;
 mod config;
 mod helpers;
 mod errors;
-
+mod products;
+mod subscriptions;
 const ACCESS_TOKEN_EXPIRY: Duration = Duration::minutes(15);
 const REFRESH_TOKEN_EXPIRY: Duration = Duration::days(30);
 
@@ -23,7 +23,6 @@ const JWT_SECRET_KEY: &str =
 
 const WEBHOOK_SECRET_KEY: &str =
     "lJhETBC/5bKgh6N1+J2pPYCpiN+9T2F2lUyAYtCCfgyC7jNG1Vt86/6LHJ8CT/y8B2KEseEaQWHazmBTduGQqw==";
-
 
 struct AppState {
     config: Config,
@@ -41,6 +40,7 @@ async fn get_api_keys() -> String {
 
 #[tokio::main]
 async fn main() {
+
     let database_url = "postgresql://neondb_owner:npg_lqSwdo0JT2Bt@ep-wild-field-ao7c4rsu-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
 
     let db = PgPool::connect(database_url).await.unwrap();
@@ -67,12 +67,16 @@ async fn main() {
             db_queries: 0,
         },
     });
-
+    let worker_state = shared_state.clone();
+    tokio::spawn(async {
+        subscription_worker(worker_state).await;
+    });
     let router = Router::new()
         .route("/", get(|| async { "Hello World" }))
-        .route("/signup", post(signup).with_state(shared_state));
+        .route("/signup", post(signup))
+        .route("/products", get(get_products))
+        .route("/products/create", post(create_products)).with_state(shared_state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, router).await.unwrap();
 }
-
